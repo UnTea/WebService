@@ -21,7 +21,8 @@ private:
 class Address {
 public:
     explicit Address(uint16_t port_number) {
-        addrinfo *res, hints {
+        addrinfo *res;
+        addrinfo hints {
             .ai_flags    = AI_PASSIVE,
             .ai_family   = AF_UNSPEC,
             .ai_socktype = SOCK_STREAM,
