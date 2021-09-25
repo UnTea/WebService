@@ -10,14 +10,6 @@
 #include <ws2tcpip.h>
 
 
-class Socket {
-public:
-
-
-private:
-
-};
-
 class Address {
 public:
     explicit Address(uint16_t port_number) {
@@ -40,6 +32,7 @@ public:
 
         for (auto p = res; p != NULL; p = p->ai_next) {
             ai_family = p->ai_family;
+            sockaddr = p;
 
             if (p->ai_family == AF_INET) {
                 ipv4 = reinterpret_cast<sockaddr_in*>(p->ai_addr);
@@ -47,14 +40,33 @@ public:
                 ipv6 = reinterpret_cast<sockaddr_in6*>(p->ai_addr);
             }
         }
+
     }
 
-    friend std::ostream& operator<< (std::ostream& stream, const Address& address);
+    [[nodiscard]] int GetAIFamily() const {
+        return ai_family;
+    }
+
+    [[nodiscard]] addrinfo* GetSockaddr() {
+        return sockaddr;
+    }
+
+    [[nodiscard]] sockaddr_in* GetIPv4() {
+        return ipv4;
+    }
+
+    [[nodiscard]] sockaddr_in6* GetIPv6() {
+        return ipv6;
+    }
+
+    friend std::ostream& operator<<
+    (std::ostream& stream, const Address& address);
 
 private:
-    sockaddr_in  *ipv4;
-    sockaddr_in6 *ipv6;
-    int          ai_family;
+    addrinfo*     sockaddr;
+    sockaddr_in*  ipv4;
+    sockaddr_in6* ipv6;
+    int           ai_family;
 };
 
 std::ostream& operator<< (std::ostream& stream, const Address& address) {
@@ -73,6 +85,65 @@ std::ostream& operator<< (std::ostream& stream, const Address& address) {
     return stream;
 }
 
+class Socket {
+public:
+    explicit Socket(Address address) {
+        int socket_file_descriptor = socket(address.GetAIFamily(), SOCK_STREAM, IPPROTO_TCP);
+
+        if (socket_file_descriptor == -1) {
+            throw std::runtime_error("Error while creating socket!");
+        }
+
+        int bind_result;
+
+        if (address.GetAIFamily() == AF_INET) {
+            bind_result = bind(socket_file_descriptor, address.GetIPv4()->sin_addr, sizeof(address.GetIPv4()->sin_addr));
+        } else {
+            bind_result = bind();
+        }
+
+//        bind(socket_file_descriptor, address.GetSockaddr()->ai_addr, address.GetSockaddr()->ai_addrlen);
+
+        if (bind_result == -1) {
+            closesocket(socket_file_descriptor);
+            throw std::runtime_error("Error while binding socket!");
+        }
+
+        int listen_result = listen(socket_file_descriptor, 8);
+
+        if (listen_result == -1) {
+            closesocket(socket_file_descriptor);
+            throw std::runtime_error("Error while Listening on socket!");
+        }
+
+        const std::string response = "Hello World";
+
+        while (true) {
+            int new_file_descriptor;
+
+            if (address.GetAIFamily() == AF_INET) {
+                new_file_descriptor = accept(socket_file_descriptor, reinterpret_cast<sockaddr *>(address.GetIPv4()),
+                                             reinterpret_cast<int *>(sizeof(address.GetIPv4()->sin_addr)));
+            } else {
+                new_file_descriptor = accept(socket_file_descriptor, reinterpret_cast<sockaddr *>(address.GetIPv4()),
+                                             reinterpret_cast<int *>(sizeof(address.GetIPv6()->sin6_addr)));
+            }
+
+            if (new_file_descriptor == -1) {
+                throw std::runtime_error("Error while Accepting on socket!");
+            }
+
+            int bytes_sent = send(new_file_descriptor, response.data(), response.length(), 0);
+            closesocket(new_file_descriptor);
+        }
+
+        closesocket(socket_file_descriptor);
+    }
+
+private:
+
+};
+
 
 int main() {
     WSADATA wsaData;
@@ -85,67 +156,89 @@ int main() {
     try {
         Address address(80);
         std::cout << address << std::endl;
+        Socket socket(address);
     } catch(std::exception& e) {
         std::cout << e.what() << std::endl;
     }
 
 #if 0
 
-    auto port_number = "80";
-    const unsigned int back_log = 8;  // number of connections allowed on the incoming queue
+
+    auto &portNum{"80"};
+    const unsigned int backLog = 8;  // number of connections allowed on the incoming queue
+
 
     addrinfo hints, *res, *p;    // we need 2 pointers, res to hold and p to iterate over
     memset(&hints, 0, sizeof(hints));
 
     // for more explanation, man socket
-    hints.ai_family = AF_UNSPEC;    // don't specify which IP version to use yet
+    hints.ai_family   = AF_UNSPEC;    // don't specify which IP version to use yet
     hints.ai_socktype = SOCK_STREAM;  // SOCK_STREAM refers to TCP, SOCK_DGRAM will be?
-    hints.ai_flags = AI_PASSIVE;
+    hints.ai_flags    = AI_PASSIVE;
 
-    int result = getaddrinfo(NULL, port_number, &hints, &res);
-    if (result != 0) {
-        std::cerr << gai_strerror(result) << "\n";
+
+    // man getaddrinfo
+    int gAddRes = getaddrinfo(NULL, portNum, &hints, &res);
+    if (gAddRes != 0) {
+        std::cerr << gai_strerror(gAddRes) << "\n";
         return -2;
     }
 
     std::cout << "Detecting addresses" << std::endl;
 
-    unsigned int address_count = 0;
-    char ip_string[INET6_ADDRSTRLEN];    // ipv6 length makes sure both ipv4/6 addresses can be stored in this variable
+    unsigned int numOfAddr = 0;
+    char ipStr[INET6_ADDRSTRLEN];    // ipv6 length makes sure both ipv4/6 addresses can be stored in this variable
+
 
     // Now since getaddrinfo() has given us a list of addresses
     // we're going to iterate over them and ask user to choose one
     // address for program to bind to
     for (p = res; p != NULL; p = p->ai_next) {
-        void *address;
-        std::string ip_ver;
+        void *addr;
+        std::string ipVer;
 
+        // if address is ipv4 address
         if (p->ai_family == AF_INET) {
-            ip_ver = "IPv4";
-            sockaddr_in *ipv4 = reinterpret_cast<sockaddr_in*>(p->ai_addr);
-            address = &(ipv4->sin_addr);
-            address_count++;
-        } else {
-            ip_ver = "IPv6";
-            sockaddr_in6 *ipv6 = reinterpret_cast<sockaddr_in6*>(p->ai_addr);
-            address = &(ipv6->sin6_addr);
-            address_count++;
+            ipVer             = "IPv4";
+            sockaddr_in *ipv4 = reinterpret_cast<sockaddr_in *>(p->ai_addr);
+            addr              = &(ipv4->sin_addr);
+            ++numOfAddr;
+        }
+
+            // if address is ipv6 address
+        else {
+            ipVer              = "IPv6";
+            sockaddr_in6 *ipv6 = reinterpret_cast<sockaddr_in6 *>(p->ai_addr);
+            addr               = &(ipv6->sin6_addr);
+            ++numOfAddr;
         }
 
         // convert IPv4 and IPv6 addresses from binary to text form
-        inet_ntop(p->ai_family, address, ip_string, sizeof(ip_string));
-        std::cout << "(" << address_count << ") " << ip_ver << " : " << ip_string << std::endl;
+        inet_ntop(p->ai_family, addr, ipStr, sizeof(ipStr));
+        std::cout << "(" << numOfAddr << ") " << ipVer << " : " << ipStr
+                << std::endl;
     }
 
     // if no addresses found :(
-    if (!address_count) {
+    if (!numOfAddr) {
         std::cerr << "Found no host address to use\n";
         return -3;
     }
 
-#endif
+    // ask user to choose an address
+    std::cout << "Enter the number of host address to bind with: ";
+    unsigned int choice = 0;
+    bool madeChoice     = false;
+    do {
+        std::cin >> choice;
+        if (choice > (numOfAddr + 1) || choice < 1) {
+            madeChoice = false;
+            std::cout << "Wrong choice, try again!" << std::endl;
+        } else
+            madeChoice = true;
+    } while (!madeChoice);
 
-#if 0
+
 
     p = res;
 
@@ -159,6 +252,7 @@ int main() {
         return -4;
     }
 
+
     // Let's bind address to our socket we've just created
     int bindR = bind(sockFD, p->ai_addr, p->ai_addrlen);
     if (bindR == -1) {
@@ -170,8 +264,9 @@ int main() {
         return -5;
     }
 
+
     // finally start listening for connections on our socket
-    int listenR = listen(sockFD, back_log);
+    int listenR = listen(sockFD, backLog);
     if (listenR == -1) {
         std::cerr << "Error while Listening on socket\n";
 
@@ -181,18 +276,23 @@ int main() {
         return -6;
     }
 
+
     // structure large enough to hold client's address
     sockaddr_storage client_addr;
     socklen_t client_addr_size = sizeof(client_addr);
 
+
     const std::string response = "Hello World";
+
 
     // a fresh infinite loop to communicate with incoming connections
     // this will take client connections one at a time
     // in further examples, we're going to use fork() call for each client connection
     while (1) {
+
         // accept call will give us a new socket descriptor
-        int newFD = accept(sockFD, (sockaddr*) &client_addr, &client_addr_size);
+        int newFD
+                = accept(sockFD, (sockaddr *) &client_addr, &client_addr_size);
         if (newFD == -1) {
             std::cerr << "Error while Accepting on socket\n";
             continue;
