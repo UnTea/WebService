@@ -36,12 +36,16 @@ public:
             m_family = p->ai_family;
 
             if (p->ai_family == AF_INET) {
-                m_ipv4 = reinterpret_cast<sockaddr_in*>(p->ai_addr);
+                m_ipv4 = *reinterpret_cast<sockaddr_in*>(p->ai_addr);
             } else {
-                m_ipv6 = reinterpret_cast<sockaddr_in6*>(p->ai_addr);
+                m_ipv6 = *reinterpret_cast<sockaddr_in6*>(p->ai_addr);
             }
         }
 
+    }
+
+    void SetFamily(int family) {
+        m_family = family;
     }
 
     [[nodiscard]] int GetFamily() const {
@@ -49,37 +53,39 @@ public:
     }
 
     [[nodiscard]] sockaddr_in* GetIPv4() {
-        return m_ipv4;
+        return &m_ipv4;
     }
 
     [[nodiscard]] const sockaddr_in* GetIPv4() const {
-        return m_ipv4;
+        return &m_ipv4;
     }
 
     [[nodiscard]] sockaddr_in6* GetIPv6() {
-        return m_ipv6;
+        return &m_ipv6;
     }
 
     [[nodiscard]] const sockaddr_in6* GetIPv6() const {
-        return m_ipv6;
+        return &m_ipv6;
     }
 
     friend std::ostream& operator<< (std::ostream& stream, const Address& address);
 
 private:
-    sockaddr_in*  m_ipv4;
-    sockaddr_in6* m_ipv6;
-    int           m_family;
+    union {
+        sockaddr_in m_ipv4;
+        sockaddr_in6 m_ipv6;
+    };
+    int m_family;
 };
 
 std::ostream& operator<< (std::ostream& stream, const Address& address) {
     char ip_string[INET6_ADDRSTRLEN];
-    void *ptr;
+    const void *ptr;
 
     if (address.m_family == AF_INET) {
-        ptr = &(address.m_ipv4->sin_addr);
+        ptr = &(address.m_ipv4.sin_addr);
     } else {
-        ptr = &(address.m_ipv6->sin6_addr);
+        ptr = &(address.m_ipv6.sin6_addr);
     }
 
     inet_ntop(address.m_family, ptr, ip_string, sizeof(ip_string));
@@ -128,6 +134,7 @@ public:
         SOCKET new_socket;
         socklen_t client_address_size;
 
+        new_client_address.SetFamily(m_address.GetFamily());
         if (new_client_address.GetFamily() == AF_INET) {
             client_address_size = sizeof(sockaddr_in);
             new_socket = accept(m_socket, reinterpret_cast<sockaddr*>(new_client_address.GetIPv4()), &client_address_size);
