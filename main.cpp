@@ -124,20 +124,16 @@ public:
         }
     }
 
-    Socket Accept(int family, Address& new_client_address) const {
+    Socket Accept(Address& new_client_address) const {
         SOCKET new_socket;
         socklen_t client_address_size;
 
-        if (family == AF_INET) {
-            client_address_size = sizeof(sockaddr_in);
-        } else {
-            client_address_size = sizeof(sockaddr_in6);
-        }
-
         if (new_client_address.GetFamily() == AF_INET) {
+            client_address_size = sizeof(sockaddr_in);
             new_socket = accept(m_socket, reinterpret_cast<sockaddr*>(new_client_address.GetIPv4()), &client_address_size);
         } else {
-            new_socket = accept(m_socket, reinterpret_cast<sockaddr*>(new_client_address.GetIPv6()), &client_address_size);;
+            client_address_size = sizeof(sockaddr_in6);
+            new_socket = accept(m_socket, reinterpret_cast<sockaddr*>(new_client_address.GetIPv6()), &client_address_size);
         }
 
         if (new_socket == -1) {
@@ -191,8 +187,18 @@ int main() {
 
         while (true) {
             Address new_client_address{};
-            Socket new_client = socket.Accept(AF_INET6, new_client_address);
-            new_client.Send("Hello world!");
+            Socket new_client = socket.Accept(new_client_address);
+            new_client.Send("HTTP/1.1 200 OK\n"
+                            "Date: Sun, 10 Oct 2010 23:26:07 GMT\n"
+                            "Server: Apache/2.2.8 (Ubuntu) mod_ssl/2.2.8 OpenSSL/0.9.8g\n"
+                            "Last-Modified: Sun, 26 Sep 2010 22:04:35 GMT\n"
+                            "ETag: \"45b6-834-49130cc1182c0\"\n"
+                            "Accept-Ranges: bytes\n"
+                            "Content-Length: 12\n"
+                            "Connection: close\n"
+                            "Content-Type: text/html\n"
+                            "\n"
+                            "Hello world!");
             std::cout << new_client_address << std::endl;
         }
 
